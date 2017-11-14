@@ -7,14 +7,12 @@ from graphene.relay import Node
 
 from ..registry import reset_global_registry
 from ..fields import SQLAlchemyConnectionField
-from ..types import SQLAlchemyObjectType
+from ..types import SQLAlchemyObjectType, SQLAlchemyList
 from .models import Article, Base, Editor, Pet, Reporter
-
-db = create_engine('sqlite:///test_sqlalchemy.sqlite3')
 
 
 @pytest.yield_fixture(scope='function')
-def session():
+def session(db):
     reset_global_registry()
     connection = db.engine.connect()
     transaction = connection.begin()
@@ -47,11 +45,10 @@ def setup_fixtures(session):
     session.commit()
 
 
-def test_should_query_well(session):
+def test_should_query_well_with_graphene_types(session):
     setup_fixtures(session)
 
     class ReporterType(SQLAlchemyObjectType):
-
         class Meta:
             model = Reporter
 
@@ -95,58 +92,257 @@ def test_should_query_well(session):
     assert result.data == expected
 
 
-def test_should_query_enums(session):
+def test_should_filter_with_sqlalchemy_fields(session):
     setup_fixtures(session)
 
-    class PetType(SQLAlchemyObjectType):
-
+    class ReporterType(SQLAlchemyObjectType):
         class Meta:
-            model = Pet
+            model = Reporter
 
     class Query(graphene.ObjectType):
-        pet = graphene.Field(PetType)
-
-        def resolve_pet(self, *args, **kwargs):
-            return session.query(Pet).first()
+        reporters = SQLAlchemyList(ReporterType)
 
     query = '''
-        query PetQuery {
-          pet {
-            name,
-            petKind
+        query ReporterQuery {
+          reporters(firstName: "ABA") {
+            firstName,
+            lastName,
+            email
           }
         }
     '''
     expected = {
-        'pet': {
-            'name': 'Lassie',
-            'petKind': 'dog'
-        }
+        'reporters': [{
+            'firstName': 'ABA',
+            'lastName': 'X',
+            'email': None
+        }]
     }
     schema = graphene.Schema(query=Query)
-    result = schema.execute(query)
+    result = schema.execute(query, context_value={'session': session})
     assert not result.errors
-    assert result.data == expected, result.data
+    assert result.data == expected
+
+
+def test_should_filter_with_custom_argument(session):
+    setup_fixtures(session)
+
+    class ReporterType(SQLAlchemyObjectType):
+        class Meta:
+            model = Reporter
+
+    class Query(graphene.ObjectType):
+        reporters = SQLAlchemyList(ReporterType, contains_o=graphene.Boolean())
+
+        def query_reporters(self, info, query, **kwargs):
+            return query.filter(Reporter.first_name.contains('O') == kwargs['contains_o'])
+
+    query = '''
+        query ReporterQuery {
+          reporters(lastName: "Y", containsO: true) {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [{
+            'firstName': 'ABO',
+            'lastName': 'Y',
+            'email': None
+        }]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
+
+    query = '''
+        query ReporterQuery {
+          reporters(containsO: false) {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [{
+            'firstName': 'ABA',
+            'lastName': 'X',
+            'email': None
+        }]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
+
+
+def test_should_filter_with_custom_operator(session):
+    setup_fixtures(session)
+
+    class ReporterType(SQLAlchemyObjectType):
+        class Meta:
+            model = Reporter
+
+    class Query(graphene.ObjectType):
+        reporters = SQLAlchemyList(ReporterType, operator='like')
+
+    query = '''
+        query ReporterQuery {
+          reporters(firstName: "%BO%") {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [{
+            'firstName': 'ABO',
+            'lastName': 'Y',
+            'email': None
+        }]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
+
+
+def test_should_order_by(session):
+    setup_fixtures(session)
+
+    class ReporterType(SQLAlchemyObjectType):
+        class Meta:
+            model = Reporter
+
+    class Query(graphene.ObjectType):
+        reporters = SQLAlchemyList(ReporterType, order_by='firstName')
+
+    query = '''
+        query ReporterQuery {
+          reporters {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [{
+            'firstName': 'ABA',
+            'lastName': 'X',
+            'email': None
+        },
+            {
+                'firstName': 'ABO',
+                'lastName': 'Y',
+                'email': None
+            }]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
+
+
+def test_should_order_by_asc(session):
+    setup_fixtures(session)
+
+    class ReporterType(SQLAlchemyObjectType):
+        class Meta:
+            model = Reporter
+
+    class Query(graphene.ObjectType):
+        reporters = SQLAlchemyList(ReporterType, order_by='first_name ASC')
+
+    query = '''
+        query ReporterQuery {
+          reporters {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [
+            {
+                'firstName': 'ABA',
+                'lastName': 'X',
+                'email': None
+            },
+            {
+                'firstName': 'ABO',
+                'lastName': 'Y',
+                'email': None
+            }
+        ]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
+
+
+def test_should_order_by_desc(session):
+    setup_fixtures(session)
+
+    class ReporterType(SQLAlchemyObjectType):
+        class Meta:
+            model = Reporter
+
+    class Query(graphene.ObjectType):
+        reporters = SQLAlchemyList(ReporterType, order_by='firstName desc')
+
+    query = '''
+        query ReporterQuery {
+          reporters {
+            firstName,
+            lastName,
+            email
+          }
+        }
+    '''
+    expected = {
+        'reporters': [
+            {
+                'firstName': 'ABO',
+                'lastName': 'Y',
+                'email': None
+            },
+            {
+                'firstName': 'ABA',
+                'lastName': 'X',
+                'email': None
+            }
+        ]
+    }
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={'session': session})
+    assert not result.errors
+    assert result.data == expected
 
 
 def test_should_node(session):
     setup_fixtures(session)
 
     class ReporterNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Reporter
-            interfaces = (Node, )
+            interfaces = (Node,)
 
         @classmethod
         def get_node(cls, info, id):
             return Reporter(id=2, first_name='Cookie Monster')
 
     class ArticleNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Article
-            interfaces = (Node, )
+            interfaces = (Node,)
 
         # @classmethod
         # def get_node(cls, id, info):
@@ -209,9 +405,9 @@ def test_should_node(session):
             'email': None,
             'articles': {
                 'edges': [{
-                  'node': {
-                      'headline': 'Hi!'
-                  }
+                    'node': {
+                        'headline': 'Hi!'
+                    }
                 }]
             },
         },
@@ -237,10 +433,9 @@ def test_should_custom_identifier(session):
     setup_fixtures(session)
 
     class EditorNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Editor
-            interfaces = (Node, )
+            interfaces = (Node,)
 
     class EditorConnection(graphene.relay.Connection):
         class Meta:
@@ -291,29 +486,25 @@ def test_should_mutate_well(session):
     setup_fixtures(session)
 
     class EditorNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Editor
-            interfaces = (Node, )
+            interfaces = (Node,)
 
     class ReporterNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Reporter
-            interfaces = (Node, )
+            interfaces = (Node,)
 
         @classmethod
         def get_node(cls, id, info):
             return Reporter(id=2, first_name='Cookie Monster')
 
     class ArticleNode(SQLAlchemyObjectType):
-
         class Meta:
             model = Article
-            interfaces = (Node, )
+            interfaces = (Node,)
 
     class CreateArticle(graphene.Mutation):
-
         class Arguments:
             headline = graphene.String()
             reporter_id = graphene.ID()
