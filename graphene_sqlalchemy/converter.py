@@ -19,7 +19,7 @@ try:
         UUIDType
     )
 except ImportError:
-    ChoiceType = JSONType = ScalarListType = TSVectorType = object
+    ChoiceType = JSONType = UUIDType = ArrowType = ScalarListType = TSVectorType = object # noqa
 
 
 def get_column_doc(column):
