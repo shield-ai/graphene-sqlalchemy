@@ -11,7 +11,13 @@ from .fields import createConnectionField
 
 try:
     from sqlalchemy_utils import (
-        ChoiceType, JSONType, ScalarListType, TSVectorType)
+        ArrowType,
+        ChoiceType,
+        JSONType,
+        ScalarListType,
+        TSVectorType,
+        UUIDType
+    )
 except ImportError:
     ChoiceType = JSONType = ScalarListType = TSVectorType = object
 
@@ -95,6 +101,8 @@ def convert_sqlalchemy_type(type, column, registry=None):
 @convert_sqlalchemy_type.register(postgresql.INET)
 @convert_sqlalchemy_type.register(postgresql.CIDR)
 @convert_sqlalchemy_type.register(TSVectorType)
+@convert_sqlalchemy_type.register(UUIDType)
+@convert_sqlalchemy_type.register(ArrowType)
 def convert_column_to_string(type, column, registry=None):
     return String(description=get_column_doc(column),
                   required=not(is_column_nullable(column)))
