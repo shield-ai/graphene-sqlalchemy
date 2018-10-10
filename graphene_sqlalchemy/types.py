@@ -8,8 +8,12 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.inspection import inspect as sqlalchemyinspect
 from sqlalchemy.orm.exc import NoResultFound
 
-from .converter import convert_sqlalchemy_column, convert_sqlalchemy_composite, convert_sqlalchemy_hybrid_method, \
-    convert_sqlalchemy_relationship
+from .converter import (
+    convert_sqlalchemy_column,
+    convert_sqlalchemy_composite,
+    convert_sqlalchemy_relationship,
+    convert_sqlalchemy_hybrid_method,
+)
 from .registry import Registry, get_global_registry
 from .utils import get_operator_function, get_query, get_snake_or_camel_attr, is_mapped_class, is_mapped_instance
 
@@ -55,9 +59,7 @@ def construct_fields(model, registry, only_fields, exclude_fields):
                 # in there. Or when we exclude this field in exclude_fields
                 continue
 
-            converted_hybrid_property = convert_sqlalchemy_hybrid_method(
-                hybrid_item
-            )
+            converted_hybrid_property = convert_sqlalchemy_hybrid_method(hybrid_item)
             fields[name] = converted_hybrid_property
 
     # Get all the columns for the relationships on the model
@@ -85,33 +87,50 @@ class SQLAlchemyObjectTypeOptions(ObjectTypeOptions):
 
 class SQLAlchemyObjectType(ObjectType):
     @classmethod
-    def __init_subclass_with_meta__(cls, model=None, registry=None, skip_registry=False,
-                                    only_fields=(), exclude_fields=(), connection=None,
-                                    use_connection=None, interfaces=(), id=None, _meta=None, **options):
+    def __init_subclass_with_meta__(
+        cls,
+        model=None,
+        registry=None,
+        skip_registry=False,
+        only_fields=(),
+        exclude_fields=(),
+        connection=None,
+        connection_class=None,
+        use_connection=None,
+        interfaces=(),
+        id=None,
+        _meta=None,
+        **options
+    ):
         assert is_mapped_class(model), (
-            'You need to pass a valid SQLAlchemy Model in '
-            '{}.Meta, received "{}".'
+            "You need to pass a valid SQLAlchemy Model in " '{}.Meta, received "{}".'
         ).format(cls.__name__, model)
 
         if not registry:
             registry = get_global_registry()
 
         assert isinstance(registry, Registry), (
-            'The attribute registry in {} needs to be an instance of '
+            "The attribute registry in {} needs to be an instance of "
             'Registry, received "{}".'
         ).format(cls.__name__, registry)
 
         sqla_fields = yank_fields_from_attrs(
-            construct_fields(model, registry, only_fields, exclude_fields),
-            _as=Field,
+            construct_fields(model, registry, only_fields, exclude_fields), _as=Field
         )
 
         if use_connection is None and interfaces:
-            use_connection = any((issubclass(interface, Node) for interface in interfaces))
+            use_connection = any(
+                (issubclass(interface, Node) for interface in interfaces)
+            )
 
         if use_connection and not connection:
             # We create the connection automatically
-            connection = Connection.create_type('{}Connection'.format(cls.__name__), node=cls)
+            if not connection_class:
+                connection_class = Connection
+
+            connection = connection_class.create_type(
+                "{}Connection".format(cls.__name__), node=cls
+            )
 
         if connection is not None:
             assert issubclass(connection, Connection), (
@@ -130,9 +149,11 @@ class SQLAlchemyObjectType(ObjectType):
             _meta.fields = sqla_fields
 
         _meta.connection = connection
-        _meta.id = id or 'id'
+        _meta.id = id or "id"
 
-        super(SQLAlchemyObjectType, cls).__init_subclass_with_meta__(_meta=_meta, interfaces=interfaces, **options)
+        super(SQLAlchemyObjectType, cls).__init_subclass_with_meta__(
+            _meta=_meta, interfaces=interfaces, **options
+        )
 
         if not skip_registry:
             registry.register(cls)
@@ -142,9 +163,7 @@ class SQLAlchemyObjectType(ObjectType):
         if isinstance(root, cls):
             return True
         if not is_mapped_instance(root):
-            raise Exception((
-                                'Received incompatible instance "{}".'
-                            ).format(root))
+            raise Exception(('Received incompatible instance "{}".').format(root))
         return isinstance(root, cls._meta.model)
 
     @classmethod

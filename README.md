@@ -43,6 +43,10 @@ from graphene_sqlalchemy import SQLAlchemyObjectType
 class User(SQLAlchemyObjectType):
     class Meta:
         model = UserModel
+        # only return specified fields
+        only_fields = ("name",)
+        # exclude specified fields
+        exclude_fields = ("last_name",)
 
 class Query(graphene.ObjectType):
     users = graphene.List(User)
@@ -98,10 +102,12 @@ class Query(graphene.ObjectType):
 schema = graphene.Schema(query=Query)
 ```
 
+### Full Examples
+
 To learn more check out the following [examples](examples/):
 
-* **Full example**: [Flask SQLAlchemy example](examples/flask_sqlalchemy)
-
+- [Flask SQLAlchemy example](examples/flask_sqlalchemy)
+- [Nameko SQLAlchemy example](examples/nameko_sqlalchemy)
 
 ## Contributing
 
