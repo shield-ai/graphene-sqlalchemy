@@ -3,16 +3,19 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 import graphene
-from graphene.relay import Node
+from graphene.relay import Connection, Node
 
 from ..registry import reset_global_registry
 from ..fields import SQLAlchemyConnectionField
-from ..types import SQLAlchemyObjectType, SQLAlchemyList
+from ..types import SQLAlchemyObjectType
+from ..utils import sort_argument_for_model, sort_enum_for_model
 from .models import Article, Base, Editor, Pet, Reporter
 
+db = create_engine("sqlite:///test_sqlalchemy.sqlite3")
 
-@pytest.yield_fixture(scope='function')
-def session(db):
+
+@pytest.yield_fixture(scope="function")
+def session():
     reset_global_registry()
     connection = db.engine.connect()
     transaction = connection.begin()
@@ -31,13 +34,13 @@ def session(db):
 
 
 def setup_fixtures(session):
-    pet = Pet(name='Lassie', pet_kind='dog')
+    pet = Pet(name="Lassie", pet_kind="dog")
     session.add(pet)
-    reporter = Reporter(first_name='ABA', last_name='X')
+    reporter = Reporter(first_name="ABA", last_name="X")
     session.add(reporter)
-    reporter2 = Reporter(first_name='ABO', last_name='Y')
+    reporter2 = Reporter(first_name="ABO", last_name="Y")
     session.add(reporter2)
-    article = Article(headline='Hi!')
+    article = Article(headline="Hi!")
     article.reporter = reporter
     session.add(article)
     editor = Editor(name="John")
@@ -62,7 +65,7 @@ def test_should_query_well_with_graphene_types(session):
         def resolve_reporters(self, *args, **kwargs):
             return session.query(Reporter)
 
-    query = '''
+    query = """
         query ReporterQuery {
           reporter {
             firstName,
@@ -73,18 +76,10 @@ def test_should_query_well_with_graphene_types(session):
             firstName
           }
         }
-    '''
+    """
     expected = {
-        'reporter': {
-            'firstName': 'ABA',
-            'lastName': 'X',
-            'email': None
-        },
-        'reporters': [{
-            'firstName': 'ABA',
-        }, {
-            'firstName': 'ABO',
-        }]
+        "reporter": {"firstName": "ABA", "lastName": "X", "email": None},
+        "reporters": [{"firstName": "ABA"}, {"firstName": "ABO"}],
     }
     schema = graphene.Schema(query=Query)
     result = schema.execute(query)
@@ -95,39 +90,7 @@ def test_should_query_well_with_graphene_types(session):
 def test_should_filter_with_sqlalchemy_fields(session):
     setup_fixtures(session)
 
-    class ReporterType(SQLAlchemyObjectType):
-        class Meta:
-            model = Reporter
-
-    class Query(graphene.ObjectType):
-        reporters = SQLAlchemyList(ReporterType)
-
-    query = '''
-        query ReporterQuery {
-          reporters(firstName: "ABA") {
-            firstName,
-            lastName,
-            email
-          }
-        }
-    '''
-    expected = {
-        'reporters': [{
-            'firstName': 'ABA',
-            'lastName': 'X',
-            'email': None
-        }]
-    }
-    schema = graphene.Schema(query=Query)
-    result = schema.execute(query, context_value={'session': session})
-    assert not result.errors
-    assert result.data == expected
-
-
-def test_should_filter_with_custom_argument(session):
-    setup_fixtures(session)
-
-    class ReporterType(SQLAlchemyObjectType):
+    class PetType(SQLAlchemyObjectType):
         class Meta:
             model = Reporter
 
@@ -137,43 +100,15 @@ def test_should_filter_with_custom_argument(session):
         def query_reporters(self, info, query, **kwargs):
             return query.filter(Reporter.first_name.contains('O') == kwargs['contains_o'])
 
-    query = '''
-        query ReporterQuery {
-          reporters(lastName: "Y", containsO: true) {
-            firstName,
-            lastName,
-            email
+    query = """
+        query PetQuery {
+          pet {
+            name,
+            petKind
           }
         }
-    '''
-    expected = {
-        'reporters': [{
-            'firstName': 'ABO',
-            'lastName': 'Y',
-            'email': None
-        }]
-    }
-    schema = graphene.Schema(query=Query)
-    result = schema.execute(query, context_value={'session': session})
-    assert not result.errors
-    assert result.data == expected
-
-    query = '''
-        query ReporterQuery {
-          reporters(containsO: false) {
-            firstName,
-            lastName,
-            email
-          }
-        }
-    '''
-    expected = {
-        'reporters': [{
-            'firstName': 'ABA',
-            'lastName': 'X',
-            'email': None
-        }]
-    }
+    """
+    expected = {"pet": {"name": "Lassie", "petKind": "dog"}}
     schema = graphene.Schema(query=Query)
     result = schema.execute(query, context_value={'session': session})
     assert not result.errors
@@ -337,7 +272,7 @@ def test_should_node(session):
 
         @classmethod
         def get_node(cls, info, id):
-            return Reporter(id=2, first_name='Cookie Monster')
+            return Reporter(id=2, first_name="Cookie Monster")
 
     class ArticleNode(SQLAlchemyObjectType):
         class Meta:
@@ -348,7 +283,7 @@ def test_should_node(session):
         # def get_node(cls, id, info):
         #     return Article(id=1, headline='Article node')
 
-    class ArticleConnection(graphene.relay.Connection):
+    class ArticleConnection(Connection):
         class Meta:
             node = ArticleNode
 
@@ -364,7 +299,7 @@ def test_should_node(session):
         def resolve_article(self, *args, **kwargs):
             return session.query(Article).first()
 
-    query = '''
+    query = """
         query ReporterQuery {
           reporter {
             id,
@@ -396,35 +331,20 @@ def test_should_node(session):
             }
           }
         }
-    '''
+    """
     expected = {
-        'reporter': {
-            'id': 'UmVwb3J0ZXJOb2RlOjE=',
-            'firstName': 'ABA',
-            'lastName': 'X',
-            'email': None,
-            'articles': {
-                'edges': [{
-                    'node': {
-                        'headline': 'Hi!'
-                    }
-                }]
-            },
+        "reporter": {
+            "id": "UmVwb3J0ZXJOb2RlOjE=",
+            "firstName": "ABA",
+            "lastName": "X",
+            "email": None,
+            "articles": {"edges": [{"node": {"headline": "Hi!"}}]},
         },
-        'allArticles': {
-            'edges': [{
-                'node': {
-                    'headline': 'Hi!'
-                }
-            }]
-        },
-        'myArticle': {
-            'id': 'QXJ0aWNsZU5vZGU6MQ==',
-            'headline': 'Hi!'
-        }
+        "allArticles": {"edges": [{"node": {"headline": "Hi!"}}]},
+        "myArticle": {"id": "QXJ0aWNsZU5vZGU6MQ==", "headline": "Hi!"},
     }
     schema = graphene.Schema(query=Query)
-    result = schema.execute(query, context_value={'session': session})
+    result = schema.execute(query, context_value={"session": session})
     assert not result.errors
     assert result.data == expected
 
@@ -437,7 +357,7 @@ def test_should_custom_identifier(session):
             model = Editor
             interfaces = (Node,)
 
-    class EditorConnection(graphene.relay.Connection):
+    class EditorConnection(Connection):
         class Meta:
             node = EditorNode
 
@@ -445,7 +365,7 @@ def test_should_custom_identifier(session):
         node = Node.Field()
         all_editors = SQLAlchemyConnectionField(EditorConnection)
 
-    query = '''
+    query = """
         query EditorQuery {
           allEditors {
             edges {
@@ -461,23 +381,14 @@ def test_should_custom_identifier(session):
             }
           }
         }
-    '''
+    """
     expected = {
-        'allEditors': {
-            'edges': [{
-                'node': {
-                    'id': 'RWRpdG9yTm9kZTox',
-                    'name': 'John'
-                }
-            }]
-        },
-        'node': {
-            'name': 'John'
-        }
+        "allEditors": {"edges": [{"node": {"id": "RWRpdG9yTm9kZTox", "name": "John"}}]},
+        "node": {"name": "John"},
     }
 
     schema = graphene.Schema(query=Query)
-    result = schema.execute(query, context_value={'session': session})
+    result = schema.execute(query, context_value={"session": session})
     assert not result.errors
     assert result.data == expected
 
@@ -497,7 +408,7 @@ def test_should_mutate_well(session):
 
         @classmethod
         def get_node(cls, id, info):
-            return Reporter(id=2, first_name='Cookie Monster')
+            return Reporter(id=2, first_name="Cookie Monster")
 
     class ArticleNode(SQLAlchemyObjectType):
         class Meta:
@@ -513,10 +424,7 @@ def test_should_mutate_well(session):
         article = graphene.Field(ArticleNode)
 
         def mutate(self, info, headline, reporter_id):
-            new_article = Article(
-                headline=headline,
-                reporter_id=reporter_id,
-            )
+            new_article = Article(headline=headline, reporter_id=reporter_id)
 
             session.add(new_article)
             session.commit()
@@ -530,7 +438,7 @@ def test_should_mutate_well(session):
     class Mutation(graphene.ObjectType):
         create_article = CreateArticle.Field()
 
-    query = '''
+    query = """
         mutation ArticleCreator {
           createArticle(
             headline: "My Article"
@@ -546,21 +454,180 @@ def test_should_mutate_well(session):
             }
           }
         }
-    '''
+    """
     expected = {
-        'createArticle': {
-            'ok': True,
-            'article': {
-                'headline': 'My Article',
-                'reporter': {
-                    'id': 'UmVwb3J0ZXJOb2RlOjE=',
-                    'firstName': 'ABA'
-                }
-            }
-        },
+        "createArticle": {
+            "ok": True,
+            "article": {
+                "headline": "My Article",
+                "reporter": {"id": "UmVwb3J0ZXJOb2RlOjE=", "firstName": "ABA"},
+            },
+        }
     }
 
     schema = graphene.Schema(query=Query, mutation=Mutation)
-    result = schema.execute(query, context_value={'session': session})
+    result = schema.execute(query, context_value={"session": session})
     assert not result.errors
     assert result.data == expected
+
+
+def sort_setup(session):
+    pets = [
+        Pet(id=2, name="Lassie", pet_kind="dog"),
+        Pet(id=22, name="Alf", pet_kind="cat"),
+        Pet(id=3, name="Barf", pet_kind="dog"),
+    ]
+    session.add_all(pets)
+    session.commit()
+
+
+def test_sort(session):
+    sort_setup(session)
+
+    class PetNode(SQLAlchemyObjectType):
+        class Meta:
+            model = Pet
+            interfaces = (Node,)
+
+    class PetConnection(Connection):
+        class Meta:
+            node = PetNode
+
+    class Query(graphene.ObjectType):
+        defaultSort = SQLAlchemyConnectionField(PetConnection)
+        nameSort = SQLAlchemyConnectionField(PetConnection)
+        multipleSort = SQLAlchemyConnectionField(PetConnection)
+        descSort = SQLAlchemyConnectionField(PetConnection)
+        singleColumnSort = SQLAlchemyConnectionField(
+            PetConnection, sort=graphene.Argument(sort_enum_for_model(Pet))
+        )
+        noDefaultSort = SQLAlchemyConnectionField(
+            PetConnection, sort=sort_argument_for_model(Pet, False)
+        )
+        noSort = SQLAlchemyConnectionField(PetConnection, sort=None)
+
+    query = """
+        query sortTest {
+            defaultSort{
+                edges{
+                    node{
+                        id
+                    }
+                }
+            }
+            nameSort(sort: name_asc){
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+            multipleSort(sort: [pet_kind_asc, name_desc]){
+                edges{
+                    node{
+                        name
+                        petKind
+                    }
+                }
+            }
+            descSort(sort: [name_desc]){
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+            singleColumnSort(sort: name_desc){
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+            noDefaultSort(sort: name_asc){
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+        }
+    """
+
+    def makeNodes(nodeList):
+        nodes = [{"node": item} for item in nodeList]
+        return {"edges": nodes}
+
+    expected = {
+        "defaultSort": makeNodes(
+            [{"id": "UGV0Tm9kZToy"}, {"id": "UGV0Tm9kZToz"}, {"id": "UGV0Tm9kZToyMg=="}]
+        ),
+        "nameSort": makeNodes([{"name": "Alf"}, {"name": "Barf"}, {"name": "Lassie"}]),
+        "noDefaultSort": makeNodes(
+            [{"name": "Alf"}, {"name": "Barf"}, {"name": "Lassie"}]
+        ),
+        "multipleSort": makeNodes(
+            [
+                {"name": "Alf", "petKind": "cat"},
+                {"name": "Lassie", "petKind": "dog"},
+                {"name": "Barf", "petKind": "dog"},
+            ]
+        ),
+        "descSort": makeNodes([{"name": "Lassie"}, {"name": "Barf"}, {"name": "Alf"}]),
+        "singleColumnSort": makeNodes(
+            [{"name": "Lassie"}, {"name": "Barf"}, {"name": "Alf"}]
+        ),
+    }  # yapf: disable
+
+    schema = graphene.Schema(query=Query)
+    result = schema.execute(query, context_value={"session": session})
+    assert not result.errors
+    assert result.data == expected
+
+    queryError = """
+        query sortTest {
+            singleColumnSort(sort: [pet_kind_asc, name_desc]){
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+        }
+    """
+    result = schema.execute(queryError, context_value={"session": session})
+    assert result.errors is not None
+
+    queryNoSort = """
+        query sortTest {
+            noDefaultSort{
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+            noSort{
+                edges{
+                    node{
+                        name
+                    }
+                }
+            }
+        }
+    """
+
+    expectedNoSort = {
+        "noDefaultSort": makeNodes(
+            [{"name": "Alf"}, {"name": "Barf"}, {"name": "Lassie"}]
+        ),
+        "noSort": makeNodes([{"name": "Alf"}, {"name": "Barf"}, {"name": "Lassie"}]),
+    }  # yapf: disable
+
+    result = schema.execute(queryNoSort, context_value={"session": session})
+    assert not result.errors
+    for key, value in result.data.items():
+        assert set(node["node"]["name"] for node in value["edges"]) == set(
+            node["node"]["name"] for node in expectedNoSort[key]["edges"]
+        )
+
