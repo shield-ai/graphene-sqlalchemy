@@ -161,8 +161,13 @@ def convert_enum_to_enum(type, column, registry=None):
 
 @convert_sqlalchemy_type.register(ChoiceType)
 def convert_column_to_enum(type, column, registry=None):
+    try:
+        choices = type.choices.__members__.items()
+    except AttributeError:
+        choices = type.choices
+
     name = "{}_{}".format(column.table.name, column.name).upper()
-    return Enum(name, type.choices, description=get_column_doc(column))
+    return Enum(name, choices, description=get_column_doc(column))
 
 
 @convert_sqlalchemy_type.register(ScalarListType)
