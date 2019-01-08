@@ -4,7 +4,8 @@ from .mutations import (
     SQLAlchemyCreate,
     SQLAlchemyDelete,
     SQLAlchemyUpdate,
-    SQLAlchemyListDelete
+    SQLAlchemyListDelete,
+    SQLAlchemyMutation
 )
 from .utils import get_query, get_session
 
@@ -18,6 +19,7 @@ __all__ = [
     'SQLAlchemyUpdate',
     'SQLAlchemyDelete',
     'SQLAlchemyListDelete',
+    'SQLAlchemyMutation',
     'get_query',
     'get_session'
 ]
