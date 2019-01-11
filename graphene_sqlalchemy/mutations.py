@@ -1,6 +1,7 @@
 from graphene import Argument, Field, List, Mutation
 from graphene.types.objecttype import ObjectTypeOptions
 from graphene.types.utils import yank_fields_from_attrs
+from graphene.types.mutation import MutationOptions
 from graphene.utils.props import props
 from sqlalchemy.inspection import inspect as sqlalchemyinspect
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -10,7 +11,7 @@ from .registry import get_global_registry
 from .utils import get_session, get_snake_or_camel_attr
 
 
-class SQLAlchemyMutationOptions(ObjectTypeOptions):
+class SQLAlchemyMutationOptions(MutationOptions):
     model = None  # type: Model
 
 
@@ -62,7 +63,8 @@ class SQLAlchemyMutation(Mutation):
 
     @classmethod
     def Field(cls, *args, **kwargs):
-        resolver = kwargs.get("resolver", cls._meta.resolver)
+        resolver = kwargs.get("resolver", None)
+        resolver = resolver if resolver else cls._meta.resolver
         return Field(
             cls._meta.output, args=cls._meta.arguments, resolver=resolver
         )
