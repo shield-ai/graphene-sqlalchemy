@@ -1,15 +1,73 @@
 from graphene import Argument, Field, List, Mutation
 from graphene.types.objecttype import ObjectTypeOptions
 from graphene.types.utils import yank_fields_from_attrs
+from graphene.types.mutation import MutationOptions
+from graphene.utils.props import props
 from sqlalchemy.inspection import inspect as sqlalchemyinspect
+from sqlalchemy.ext.hybrid import hybrid_property
 
 from graphene_sqlalchemy.types import construct_fields
 from .registry import get_global_registry
 from .utils import get_session, get_snake_or_camel_attr
 
 
-class SQLAlchemyMutationOptions(ObjectTypeOptions):
+class SQLAlchemyMutationOptions(MutationOptions):
     model = None  # type: Model
+
+
+class SQLAlchemyMutation(Mutation):
+    @classmethod
+    def __init_subclass_with_meta__(cls, model=None, registry=None, only_fields=(), exclude_fields=None, **options):
+        meta = SQLAlchemyMutationOptions(cls)
+        meta.model = model
+
+        model_inspect = sqlalchemyinspect(model)
+        cls._model_inspect = model_inspect
+
+        if not isinstance(exclude_fields, list):
+            if exclude_fields:
+                exclude_fields = list(exclude_fields)
+            else:
+                exclude_fields = []
+
+        for primary_key_column in model_inspect.primary_key:
+            if primary_key_column.autoincrement:
+                exclude_fields.append(primary_key_column.name)
+
+        for relationship in model_inspect.relationships:
+            exclude_fields.append(relationship.key)
+
+        for field in model_inspect.all_orm_descriptors:
+            if type(field) == hybrid_property:
+                exclude_fields.append(field.__name__)
+
+        if not registry:
+            registry = get_global_registry()
+
+        fields = construct_fields(model, registry, only_fields, exclude_fields)
+
+        argument_cls = getattr(cls, "Arguments", None)
+        if argument_cls:
+            fields.update(props(argument_cls))
+
+        arguments = yank_fields_from_attrs(
+            fields,
+            _as=Argument
+        )
+
+        super(SQLAlchemyMutation, cls).__init_subclass_with_meta__(_meta=meta, arguments=arguments, **options)
+
+    @classmethod
+    def mutate(cls, self, info, **kwargs):
+        pass
+
+    @classmethod
+    def Field(cls, *args, **kwargs):
+        resolver = kwargs.get("resolver", None)
+        resolver = resolver if resolver else cls._meta.resolver
+        return Field(
+            cls._meta.output, args=cls._meta.arguments, resolver=resolver
+        )
 
 
 class SQLAlchemyCreate(Mutation):
