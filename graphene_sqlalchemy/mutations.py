@@ -1,4 +1,4 @@
-from graphene import Argument, Field, List, Mutation
+from graphene import Argument, Field, List, Mutation, NonNull
 from graphene.types.objecttype import ObjectTypeOptions
 from graphene.types.utils import yank_fields_from_attrs
 from graphene.types.mutation import MutationOptions
@@ -13,11 +13,12 @@ from .utils import get_session, get_snake_or_camel_attr
 
 class SQLAlchemyMutationOptions(MutationOptions):
     model = None  # type: Model
+    optional_fields = []
 
 
 class SQLAlchemyMutation(Mutation):
     @classmethod
-    def __init_subclass_with_meta__(cls, model=None, registry=None, only_fields=(), exclude_fields=None, **options):
+    def __init_subclass_with_meta__(cls, model=None, registry=None, optional_fields=[], only_fields=(), exclude_fields=None, **options):
         meta = SQLAlchemyMutationOptions(cls)
         meta.model = model
 
@@ -45,6 +46,10 @@ class SQLAlchemyMutation(Mutation):
             registry = get_global_registry()
 
         fields = construct_fields(model, registry, only_fields, exclude_fields)
+
+        for field_name in optional_fields:
+            if field_name in fields:
+                fields[field_name].kwargs["required"] = False
 
         argument_cls = getattr(cls, "Arguments", None)
         if argument_cls:
